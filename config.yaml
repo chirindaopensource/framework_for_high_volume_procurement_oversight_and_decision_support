@@ -1,0 +1,346 @@
+# ==============================================================================
+# PHI STUDY CONFIGURATION: INTEGRATED UNSUPERVISED FRAMEWORK (REVISED)
+# ==============================================================================
+# This configuration fixes every reproducibility-relevant convention:
+# - windowing rules
+# - missingness handling
+# - entity resolution (tokenization + TF-IDF vectorizer + ensemble score)
+# - scaling scope + quantile definitions
+# - GMM fit space, selection, pruning, and reporting transforms
+# - PHI scoring + tier mapping + attribution
+# - threshold anchoring unit of analysis + inferential settings
+# ==============================================================================
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# STUDY METADATA (REPRODUCIBILITY ANCHORS)
+# -------------------------------------------------------------------------------------------------------------------------------
+study_metadata:
+  dataset_name: "City of York Council Payments to Suppliers over £250"
+  analysis_window:
+    start_date_inclusive: "2025-05-01"            # UNSPECIFIED IN MANUSCRIPT (date boundary detail)
+    end_date_inclusive: "2025-10-31"              # UNSPECIFIED IN MANUSCRIPT (date boundary detail)
+    timezone: "naive_local_date"                  # UNSPECIFIED IN MANUSCRIPT
+    windowing_rule: "Payment Date within [start,end] inclusive"
+  source_access:
+    portal_url: "https://data.yorkopendata.org/..." # Provided in manuscript reference; keep exact resource URL
+    resource_id: "87260305-e43a-40a4-866e-ef5e050a3426"
+    accessed_date: "2025-12-26"
+  reproducibility:
+    global_random_seed: 0                         # Align with GMM seed; extend to permutation RNG
+    float_precision: "float64"                    # UNSPECIFIED IN MANUSCRIPT (but essential)
+    library_versions:
+      python: null                                # UNSPECIFIED IN MANUSCRIPT
+      numpy: null                                 # UNSPECIFIED IN MANUSCRIPT
+      pandas: null                                # UNSPECIFIED IN MANUSCRIPT
+      scikit_learn: null                          # UNSPECIFIED IN MANUSCRIPT
+      rapidfuzz_or_equivalent: null               # UNSPECIFIED IN MANUSCRIPT (token_set_ratio provider)
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# RAW DATA INGESTION SCHEMA: UNPROCESSED ADMINISTRATIVE INPUTS
+# -------------------------------------------------------------------------------------------------------------------------------
+raw_unprocessed_data_schema:
+  record_id: "int64"                # Synthetic primary key (audit trace)
+  Organisation Name: "string"
+  Directorate: "string"
+  Department: "string"
+  Service Plan: "string"
+  Creditor Name: "string"
+  Payment Date: "datetime64[ns]"
+  Transaction No: "string"
+  Card Transaction: "bool"
+  Net Amount: "float64"
+  Irrecoverable VAT: "float64"
+  Subjective Group: "string"
+  Subjective Subgroup: "string"
+  Subjective Detail: "string"
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# INGESTION + DATA INTEGRITY CONVENTIONS (SILENT-DRIFT PREVENTION)
+# -------------------------------------------------------------------------------------------------------------------------------
+ingestion_conventions:
+  column_name_normalization:
+    strip_whitespace: true                         # UNSPECIFIED IN MANUSCRIPT
+    case_sensitive_column_match: true              # UNSPECIFIED IN MANUSCRIPT
+  type_coercion:
+    net_amount_parsing:
+      allow_currency_symbols: true                 # UNSPECIFIED IN MANUSCRIPT
+      allow_thousands_separators: true             # UNSPECIFIED IN MANUSCRIPT
+      on_parse_error: "raise"                      # UNSPECIFIED IN MANUSCRIPT (recommend raise for rigor)
+    payment_date_parsing:
+      on_parse_error: "raise"                      # UNSPECIFIED IN MANUSCRIPT
+  missingness_policy:
+    Creditor Name: "drop_row"                      # UNSPECIFIED IN MANUSCRIPT
+    Net Amount: "drop_row"                         # UNSPECIFIED IN MANUSCRIPT
+    Payment Date: "drop_row"                       # UNSPECIFIED IN MANUSCRIPT
+  duplicate_policy:
+    deduplicate_on_transaction_no: false           # UNSPECIFIED IN MANUSCRIPT (default: no dedup)
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# DATA STRUCTURE PRE-PROCESSING PARAMETERS
+# -------------------------------------------------------------------------------------------------------------------------------
+pre_processing_parameters:
+  # (1) Window restriction
+  window_filtering:
+    apply: true
+    field: "Payment Date"
+    rule: "inclusive_between_start_end"            # UNSPECIFIED IN MANUSCRIPT (formalization)
+  
+  # (2) Positive-flow isolation
+  exclusion_logic:
+    exclude_non_positive: true                     # Paper: exclude non-positive net amounts
+    non_positive_definition: "Net Amount <= 0"
+    expected_percent_removed_in_study: 1.75        # Diagnostic checkpoint (681 rows)
+  
+  # (3) Identity harmonisation
+  identity_harmonisation_logical_gates:
+    # 3.1 Normalization transforms (paper specified at high level)
+    normalization:
+      uppercase: true
+      remove_punctuation: true
+      punctuation_regex: "[^\\w\\s]"               # UNSPECIFIED IN MANUSCRIPT
+      collapse_whitespace: true                    # UNSPECIFIED IN MANUSCRIPT
+      ampersand_to_AND: true                       # UNSPECIFIED IN MANUSCRIPT
+      suffix_standardization:
+        enabled: true
+        map:
+          LTD: "LIMITED"
+          LTD.: "LIMITED"
+          LIMITED: "LIMITED"
+          # Extend as needed (PLC, LLP, INC, CO, etc.) # UNSPECIFIED IN MANUSCRIPT
+        drop_suffix_tokens_after_standardize: true # UNSPECIFIED IN MANUSCRIPT (recommended)
+    
+    # 3.2 Candidate-pair generation (determinism + completeness)
+    pair_generation:
+      strategy: "all_pairs"                        # UNSPECIFIED IN MANUSCRIPT (but feasible at ~1.9k names)
+      blocking_keys: null                          # UNSPECIFIED IN MANUSCRIPT
+    
+    # 3.3 TF–IDF cosine similarity (paper gives threshold but not vectorizer)
+    tf_idf_cosine_similarity:
+      threshold: 0.76
+      vectorizer:
+        analyzer: "char_wb"                        # UNSPECIFIED IN MANUSCRIPT (robust for names)
+        ngram_range: [3, 5]                        # UNSPECIFIED IN MANUSCRIPT
+        lowercase: false                           # Because we uppercase in normalization
+        sublinear_tf: true                         # UNSPECIFIED IN MANUSCRIPT
+        use_idf: true                              # UNSPECIFIED IN MANUSCRIPT
+        smooth_idf: true                           # UNSPECIFIED IN MANUSCRIPT
+        norm: "l2"                                 # UNSPECIFIED IN MANUSCRIPT
+    
+    # 3.4 Token set ratio (paper gives threshold but not library/tokenization)
+    token_set_ratio:
+      threshold: 77
+      library_function: "rapidfuzz.fuzz.token_set_ratio" # UNSPECIFIED IN MANUSCRIPT
+      tokenization:
+        split_rule: "whitespace"
+        drop_tokens: ["LIMITED"]                   # UNSPECIFIED IN MANUSCRIPT (if drop_suffix_tokens enabled)
+        min_token_length: 1                        # UNSPECIFIED IN MANUSCRIPT
+      score_scale: "0_to_100"
+    
+    # 3.5 Token Jaccard overlap (paper gives threshold; define exact formula)
+    token_jaccard_overlap:
+      threshold: 0.36
+      tokenization:
+        split_rule: "whitespace"
+        drop_tokens: ["LIMITED"]                   # UNSPECIFIED IN MANUSCRIPT
+        normalization_shared_with_token_set_ratio: true
+      definition: "|A ∩ B| / |A ∪ B|"              # UNSPECIFIED IN MANUSCRIPT (formalization)
+    
+    # 3.6 Ensemble composite score (paper uses but does not define)
+    ensemble_composite_score:
+      threshold_strict_greater_than: 0.66
+      definition: "mean_of_normalized_metrics"     # UNSPECIFIED IN MANUSCRIPT
+      formula: "Ens = (cos_tfidf + token_set_ratio/100 + jaccard)/3" # UNSPECIFIED IN MANUSCRIPT
+      weights: [0.3333333333333333, 0.3333333333333333, 0.3333333333333333] # UNSPECIFIED IN MANUSCRIPT
+    
+    # 3.7 Graph clustering and canonical naming
+    clustering_method: "connected_components"
+    canonical_naming:
+      method: "modal_string"
+      tie_breaker: "lexicographic_min"             # UNSPECIFIED IN MANUSCRIPT
+    
+    # 3.8 Ethics protocol
+    ethics_protocol:
+      pseudonymization: true
+      pseudonym_method: "salted_sha256"            # UNSPECIFIED IN MANUSCRIPT
+      salt_storage: "secure_secrets_manager"       # UNSPECIFIED IN MANUSCRIPT
+    
+    # Diagnostic checkpoint
+    expected_unique_suppliers_after_harmonisation: 1896 # Study reported (from 1911 raw)
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# COHORT SELECTION AND GLOBAL SCALING HEURISTICS
+# -------------------------------------------------------------------------------------------------------------------------------
+cohort_selection_and_scaling:
+  # Cohort selection
+  frequency_threshold_n: 50
+  
+  # kmax heuristic
+  observations_per_parameter: 25                       # Paper heuristic
+  
+  # Robust scaling
+  robust_scaling_global:
+    center: "median"                                   # \\tilde{A}
+    scale: "IQR"                                       # Q3 - Q1
+    scaling_scope: "all_positive_payments_in_window"   # UNSPECIFIED IN MANUSCRIPT (must be fixed)
+    standardization_equation: "a_tilde_i=(a_i-A_tilde)/IQR"
+  
+  # Quantile conventions (silent drift prevention)
+  quantile_conventions:
+    quantiles_required: [0.05, 0.25, 0.50, 0.75, 0.95]
+    interpolation_method: "linear"                     # UNSPECIFIED IN MANUSCRIPT
+    ties_handling: "standard_quantile_definition"      # UNSPECIFIED IN MANUSCRIPT
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# GAUSSIAN MIXTURE MODEL (GMM) HYPERPARAMETERS
+# -------------------------------------------------------------------------------------------------------------------------------
+gmm_hyperparameters:
+  # Model selection
+  model_selection:
+    max_components_cap: 4
+    selection_criterion: "BIC"
+    k_logic: "kmax=min(4, floor(n/25))"
+  
+  # Fit space vs reporting space (critical to reproduce GBP plots and anchoring)
+  fit_and_reporting_space:
+    gmm_fit_space: "robust_standardised"               # Paper theory indicates standardised space
+    phi_computation_space: "robust_standardised"       # Consistency: PHI uses the same space
+    report_mu_space: "gbp_backtransform"               # UNSPECIFIED IN MANUSCRIPT (needed to match GBP centres/peaks)
+    backtransform_equations:
+      mu_gbp: "mu_scaled*IQR + A_tilde"                # UNSPECIFIED IN MANUSCRIPT (but mathematically implied)
+      s_gbp: "s_scaled*IQR"                            # UNSPECIFIED IN MANUSCRIPT
+  
+  # EM settings (paper explicit)
+  em_algorithm_settings:
+    covariance_type: "spherical"
+    init_params: "k-means"
+    n_init: 1
+    convergence_tol: 0.001
+    max_iter: 100
+    random_state_seed: 0
+    regularizer_lambda: 0.000001
+  
+  # Mixture pruning (paper explicit)
+  mixture_pruning:
+    min_weight_pi: 0.05
+    renormalize: true
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# PHI COMPUTATIONAL AND SYNTHESIS CONSTANTS
+# -------------------------------------------------------------------------------------------------------------------------------
+phi_computational_constants:
+  modality_factor:
+    definition: "M=k_post_pruning"                     # UNSPECIFIED IN MANUSCRIPT (clarification required)
+  asymmetry_method:
+    name: "bowley"
+    equations:
+      aq: "(Q0.75+Q0.25-2Q0.50)/(Q0.75-Q0.25) if Q0.75!=Q0.25 else 0"
+      A: "1+|aq|"
+  tail_behavior:
+    quantiles_used: [0.05, 0.25, 0.75, 0.95]
+    stability_epsilon: 0.000001
+    equations:
+      tq: "((Q0.95-Q0.05)+eps)/((Q0.75-Q0.25)+eps)"
+      T: "1+|ln(tq)|"
+  structural_dispersion:
+    dominant_regime_logic: "i*=argmax(pi)"
+    distance_definition: "di=|mu_i-mu_i*|"
+    dampening_function: "ln(1+di)"
+    equation: "D=1+pi_i* s_i* + sum_{i!=i*} pi_i s_i ln(1+di)"
+  synthesis_logic:
+    aggregation: "multiplicative"
+    equation: "PHI=M*A*T*D"
+    principle: "joint_amplification"
+    decomposition_equation: "Contribution_X = ln(X)/ln(PHI) * 100%"
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# RISK RANKING AND TIERING (OPERATIONAL LAYER)
+# -------------------------------------------------------------------------------------------------------------------------------
+risk_ranking_and_tiering:
+  percentile_ranking:
+    method: "empirical_percentile_rank"                # UNSPECIFIED IN MANUSCRIPT
+    ties: "average_rank"                               # UNSPECIFIED IN MANUSCRIPT
+  tier_mapping:
+    low_phi_percentile_lt: 70
+    moderate_phi_percentile_range: [70, 90]
+    high_phi_percentile_ge: 90
+    whole_supplier_adjustment:
+      enabled: true
+      rule: "select_top_ceil(N*0.10)_as_high"          # Based on manuscript description of 11.9 -> 12 suppliers
+      tie_breaker: "higher_PHI_then_lexicographic"     # UNSPECIFIED IN MANUSCRIPT
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# THRESHOLD ANCHORING ANALYSIS PARAMETERS
+# -------------------------------------------------------------------------------------------------------------------------------
+threshold_anchoring_parameters:
+  # Peak extraction from high-PHI centres (paper explicit)
+  peak_extraction:
+    input_centres_source: "high_PHI_GMM_centres"
+    centre_space: "gbp"                                # Required to match £ binning and reported peaks
+    histogram_range_gbp: [0, 30000]
+    bin_width_gbp: 100
+    smoother: "gaussian_kernel"
+    sigma_bins: 4
+    relative_prominence_threshold: 0.04
+    boundary_limit_gbp: 300
+  
+  # Proximity classification + inferential validation (paper explicit in outcomes)
+  validation_statistics:
+    analysis_unit: "gmm_centres"                       # Align with figure captions; text has one ambiguous sentence
+    proximity_tolerance: 0.10
+    stringent_tolerance: 0.05
+    permutation_iterations: 5000
+    permutation_rng_seed: 0                            # UNSPECIFIED IN MANUSCRIPT (but required)
+    divergence_test: "two_sample_KS"
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# BASELINE COMPARISON (CV) AND CORRELATION REPORTING
+# -------------------------------------------------------------------------------------------------------------------------------
+baseline_comparison:
+  coefficient_of_variation:
+    equation: "CV=sigma/mu"
+    amount_space: "raw_gbp_positive_only"              # UNSPECIFIED IN MANUSCRIPT (most conventional)
+  rank_correlation:
+    method: "spearman"
+    two_sided_p_value: true                            # UNSPECIFIED IN MANUSCRIPT
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# MANAGEMENT TRIAGE AND VISUALISATION CONVENTIONS (NON-COMPUTATIONAL OUTPUT LAYER)
+# -------------------------------------------------------------------------------------------------------------------------------
+management_and_viz:
+  plot_standards:
+    truncate_visual_at_percentile: 99                  # Paper: truncated at 99th percentile for clarity
+    tier_color_mapping:
+      low:
+        color: "blue"
+        marker: "circle"
+      moderate:
+        color: "orange"
+        marker: "cross"
+      high:
+        color: "red"
+        marker: "square"
+  directorate_reporting:
+    report_absolute_counts: true
+    report_prevalence: true
+    unit: "suppliers"
+    notes_small_directorate_caution: true              # Paper explicitly cautions
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# AI PROTOCOLS AND EXPLAINABILITY PROMPTS (NOT USED FOR QUANTITATIVE REPRODUCTION)
+# -------------------------------------------------------------------------------------------------------------------------------
+ai_explainability_prompts:
+  llm_metadata:
+    models: ["Gemini 3.0 Flash", "GPT-5.4 mini"]
+    platform: "Abacus.AI ChatLLM"
+    purpose: "Language/readability enhancement only (manuscript writing)"
+    used_in_methods_pipeline: false                    # Critical: must remain False for replication fidelity
+  analyst_prompt_templates:
+    attribution_logic: >
+      For the prioritised supplier {id}, decompose the PHI score {phi} into
+      log-contributions. Identify whether the signal is driven by Structural
+      Dispersion (D contribution {d_pct}%) implying regime separation, or Tail
+      Behaviour (T contribution {t_pct}%) implying clustering/outliers.
+    forensic_hypothesis: >
+      Given modality M={k}, examine Subjective Detail distributions across
+      payment regimes centred at {mu_list}. Assess whether regimes correspond
+      to distinct service lines or a shift in billing scale within a category.

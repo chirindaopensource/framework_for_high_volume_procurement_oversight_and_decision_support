@@ -1,0 +1,194 @@
+# ==============================================================================
+# requirements.txt
+# ==============================================================================
+#
+# Project : The Payment Heterogeneity Index (PHI)
+#           An Integrated Unsupervised Framework for High-Volume Procurement
+#           Oversight and Decision Support
+#
+# Paper   : Christodoulides, K. (2026). The Payment Heterogeneity Index.
+#           arXiv:2605.12547. https://arxiv.org/abs/2605.12547
+#
+# Author  : CS Chirinda
+# License : MIT
+# Python  : >=3.10, <3.13   (f-strings, match-case, structural typing)
+#
+# Versioning Strategy:
+#   • Lower bound  — minimum version at which the specific API surface used
+#                    by this codebase (e.g. GaussianMixture.bic, rapidfuzz.fuzz)
+#                    is guaranteed stable and correctly implemented.
+#   • Upper bound  — next MAJOR version excluded to prevent silent breaking
+#                    changes in scientific ABIs (NumPy C-extension ABI,
+#                    sklearn Estimator API, etc.).
+#   • Operator ~=  — compatible-release shorthand used only where the upstream
+#                    project follows strict SemVer and API stability pledges.
+#
+# Dependency Groups (in order of the import block):
+#   [1] Core Scientific Stack   — numpy, pandas
+#   [2] Statistical Computing   — scipy
+#   [3] Machine Learning        — scikit-learn
+#   [4] Graph Theory            — networkx
+#   [5] String Metrics          — rapidfuzz
+#
+# NOTE: All packages in the Standard Library (sys, copy, json, math, hashlib,
+#       logging, importlib, traceback, itertools, re, typing, dataclasses)
+#       require NO pip entry — they ship with CPython >= 3.10.
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# [1] CORE SCIENTIFIC STACK
+# ------------------------------------------------------------------------------
+# numpy
+#   Used for: IEEE-754 float safeguards (np.finfo), vectorised Monte Carlo
+#   permutation arrays, quantile computation (np.quantile), IQR calculation,
+#   and all intermediate ndarray arithmetic throughout the pipeline.
+#
+#   Lower bound 1.26.4:
+#     • Stable C-extension ABI compatible with SciPy 1.13+ and scikit-learn 1.5+.
+#     • np.quantile(method='hazen') signature solidified in 1.22; 1.26 adds
+#       full dtype-promotion rules required by NumPy 2.0 migration path.
+#   Upper bound <3.0.0:
+#     • NumPy 2.x introduced breaking ABI; <3.0.0 allows both 1.26.x and 2.x
+#       series while excluding any hypothetical 3.x rewrite.
+numpy>=1.26.4,<3.0.0
+
+# pandas
+#   Used for: ingestion of the City of York Council CSV transparency release,
+#   DataFrame-level filtration (Net Amount > 0), supplier-group aggregation,
+#   percentile-rank construction (pd.Series.rank(pct=True)), and final
+#   decision-support table assembly.
+#
+#   Lower bound 2.2.2:
+#     • Copy-on-Write semantics fully enabled by default (critical for
+#       pipeline correctness when passing DataFrame slices between stages).
+#     • pd.DataFrame.to_string() and .style formatting stabilised for
+#       audit-trail reporting in 2.2.x.
+#     • ArrowDtype backend available but not required; ensures forward compat.
+#   Upper bound <3.0.0:
+#     • pandas 3.0 is expected to deprecate legacy Index types and change
+#       default dtypes; pin out to avoid silent schema mutations.
+pandas>=2.2.2,<3.0.0
+
+
+# ------------------------------------------------------------------------------
+# [2] STATISTICAL COMPUTING
+# ------------------------------------------------------------------------------
+# scipy
+#   Used for:
+#     • scipy.stats.ks_2samp     — Two-Sample Kolmogorov–Smirnov test between
+#                                   High-PHI and Low-PHI payment distributions.
+#     • scipy.ndimage.gaussian_filter1d — 1-D Gaussian smoothing of the KDE
+#                                         histogram for endogenous peak extraction.
+#     • scipy.signal.find_peaks  — Peak detection on the smoothed KDE curve to
+#                                   identify threshold-anchoring candidates.
+#     • scipy.sparse              — Sparse matrix representation of the TF-IDF
+#                                   cosine-similarity computation (memory-safe
+#                                   for 1,896 × 1,896 name pair matrix).
+#
+#   Lower bound 1.13.1:
+#     • scipy.signal.find_peaks 'prominence' kwarg is stable since 1.1;
+#       1.13.x fixes a critical regression in ks_2samp p-value computation
+#       for tied samples that is directly relevant to procurement heaping.
+#     • scipy.sparse.csr_matrix.dot() memory layout fix in 1.12 required.
+#   Upper bound <2.0.0:
+#     • SciPy 2.0 is planned to remove legacy stats function signatures;
+#       pin to avoid audit-trail reproducibility breakage.
+scipy>=1.13.1,<2.0.0
+
+
+# ------------------------------------------------------------------------------
+# [3] MACHINE LEARNING AND PROBABILISTIC MODELING
+# ------------------------------------------------------------------------------
+# scikit-learn
+#   Used for:
+#     • sklearn.mixture.GaussianMixture — Core GMM fitting per supplier with
+#       covariance_type='spherical', BIC-based model order selection, and
+#       component pruning (pi < 0.05).
+#     • sklearn.feature_extraction.text.TfidfVectorizer — Transforms normalised
+#       supplier name strings into TF-IDF vector space for cosine-similarity
+#       computation in the entity-resolution fuzzy-gate pipeline.
+#
+#   Lower bound 1.5.1:
+#     • GaussianMixture.bic() computation uses a corrected log-likelihood
+#       formula standardised in 1.4+; 1.5.1 resolves a numerical instability
+#       in EM convergence when covariance matrices approach the variance floor.
+#     • TfidfVectorizer.fit_transform returns a scipy.sparse.csr_matrix;
+#       1.5.x ensures consistent sparse output across all tokenization paths.
+#   Upper bound <2.0.0:
+#     • sklearn 2.0 will drop the clone() interface used internally; pin to
+#       maintain reproducible GaussianMixture seeding behaviour.
+scikit-learn>=1.5.1,<2.0.0
+
+
+# ------------------------------------------------------------------------------
+# [4] GRAPH THEORY AND NETWORK ANALYSIS
+# ------------------------------------------------------------------------------
+# networkx
+#   Used for: construction of the supplier Match Graph where each raw creditor
+#   string is a node and a fuzzy-ensemble match (all four gate thresholds
+#   satisfied simultaneously) creates an undirected edge. Connected Components
+#   extraction (nx.connected_components) then partitions the graph into
+#   canonical supplier clusters for identity harmonisation.
+#
+#   Lower bound 3.3:
+#     • nx.connected_components() on undirected Graph stabilised and
+#       performance-optimised in 3.x series for datasets of this scale (~1,900
+#       nodes, sparse edges).
+#     • networkx 3.3 introduces typed graph stubs compatible with mypy strict
+#       mode — required for the codebase's strict static type checking mandate.
+#   Upper bound <4.0:
+#     • 4.0 is expected to drop Graph.__getitem__ dict-like access; pin out.
+networkx>=3.3,<4.0
+
+
+# ------------------------------------------------------------------------------
+# [5] STRING METRICS AND FUZZY MATCHING
+# ------------------------------------------------------------------------------
+# rapidfuzz
+#   Used for: Token Set Ratio computation (rapidfuzz.fuzz.token_set_ratio)
+#   within the four-condition ensemble gate for supplier identity resolution.
+#   rapidfuzz is a Cython-accelerated reimplementation of the fuzzywuzzy API,
+#   providing 10–100x throughput improvement over the pure-Python equivalent —
+#   critical for the O(N^2) all-pairs comparison across ~1,900 supplier names.
+#   It also provides the Jaccard-overlap building block through its string
+#   preprocessing utilities.
+#
+#   MANDATORY: This is an explicit hard dependency. The codebase raises
+#   ImportError at module load time if rapidfuzz is absent (see import block).
+#   Do NOT substitute with fuzzywuzzy + python-Levenshtein — the Token Set
+#   Ratio normalisation formula differs and will produce non-reproducible
+#   ensemble scores relative to the paper's gate threshold of > 0.66.
+#
+#   Lower bound 3.9.4:
+#     • fuzz.token_set_ratio() score_cutoff fast-path introduced in 3.6;
+#       3.9.x resolves a Unicode normalisation edge case in corporate suffix
+#       matching (e.g., "PLC" vs "P.L.C") that would corrupt the gate logic.
+#     • process.cdist() vectorised pairwise scoring available from 3.0;
+#       3.9.4 is the earliest release with a stable Windows + Linux ABI.
+#   Upper bound <4.0.0:
+#     • rapidfuzz 4.0 is expected to change the score normalisation range;
+#       the gate thresholds (token_set_ratio >= 77) are calibrated against
+#       the [0, 100] integer scale of the 3.x API. A version bump must be
+#       accompanied by explicit threshold recalibration.
+rapidfuzz>=3.9.4,<4.0.0
+
+
+# ==============================================================================
+# END OF REQUIREMENTS
+# ==============================================================================
+#
+# Installation:
+#   pip install --upgrade pip
+#   pip install -r requirements.txt
+#
+# Reproducible Environment (recommended for audit purposes):
+#   pip install pip-tools
+#   pip-compile requirements.txt --output-file requirements.lock
+#   pip install -r requirements.lock
+#
+# Verification:
+#   python -c "import numpy, pandas, scipy, sklearn, networkx, rapidfuzz; \
+#              print('All PHI dependencies satisfied.')"
+#
+# ==============================================================================

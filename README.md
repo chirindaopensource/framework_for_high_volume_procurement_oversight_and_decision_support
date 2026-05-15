@@ -98,7 +98,7 @@ $$ Contribution_X = \left( \frac{\ln(X)}{\ln(PHI)} \right) \times 100\% $$
 Below is a diagram which summarizes the proposed approach:
 
 <div align="center">
-  <img src="https://github.com/chirindaopensource/framework_for_high_volume_procurement_oversight_and_decision_support/blob/main/framework_for_high_volume_procurement_oversight_and_decision_support_ipo_main_four.png" alt="PHI System Architecture" width="100%">
+  <img src="https://github.com/chirindaopensource/framework_for_high_volume_procurement_oversight_and_decision_support/blob/main/framework_for_high_volume_procurement_oversight_and_decision_support_ipo_main.png" alt="PHI System Architecture" width="100%">
 </div>
 
 ## Features
